@@ -29,7 +29,7 @@ class DayState:
     contexts: list = field(default_factory=list)
 
 
-def load_model(path="fixed_layer_model.json"):
+def load_model(path=__import__("os").path.join(__import__("os").path.dirname(__file__), "fixed_layer_model.json")):
     with open(path, encoding="utf-8") as f:
         m = json.load(f)
     for k in ("mu", "sd", "coef_mean", "coef_draws", "b0_draws"):
