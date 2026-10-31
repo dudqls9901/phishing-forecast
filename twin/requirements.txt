@@ -1,0 +1,5 @@
+numpy
+scipy
+scikit-learn
+pandas
+anthropic   # 선택: 없거나 API 키가 없으면 맥락 판단은 규칙 기반으로 자동 대체

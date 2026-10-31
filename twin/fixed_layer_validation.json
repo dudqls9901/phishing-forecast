@@ -1,0 +1,121 @@
+{
+  "rho_table": [
+    {
+      "var": "age",
+      "paper": 0.251,
+      "synthetic_mean": 0.2542526824555066,
+      "synthetic_95": [
+        0.19434702756435218,
+        0.31219530136815465
+      ]
+    },
+    {
+      "var": "job_experience",
+      "paper": 0.241,
+      "synthetic_mean": 0.24237851184935566,
+      "synthetic_95": [
+        0.18363230930719396,
+        0.29758838196105425
+      ]
+    },
+    {
+      "var": "cs_knowledge",
+      "paper": 0.185,
+      "synthetic_mean": 0.18990832185593212,
+      "synthetic_95": [
+        0.13160489249483254,
+        0.25197555373380864
+      ]
+    },
+    {
+      "var": "education",
+      "paper": 0.163,
+      "synthetic_mean": 0.16900560071985266,
+      "synthetic_95": [
+        0.11846979957682174,
+        0.22395846769645583
+      ]
+    },
+    {
+      "var": "self_confidence",
+      "paper": 0.107,
+      "synthetic_mean": 0.11194980164449383,
+      "synthetic_95": [
+        0.044257467018005245,
+        0.16945779363971628
+      ]
+    },
+    {
+      "var": "authority_suscept",
+      "paper": -0.084,
+      "synthetic_mean": -0.0829681511393775,
+      "synthetic_95": [
+        -0.14700483487639412,
+        -0.027634164439169
+      ]
+    },
+    {
+      "var": "agreeableness",
+      "paper": -0.079,
+      "synthetic_mean": -0.07925110493313156,
+      "synthetic_95": [
+        -0.13919858107710037,
+        -0.027315420028662867
+      ]
+    },
+    {
+      "var": "prior_attack",
+      "paper": -0.072,
+      "synthetic_mean": -0.07655283224547384,
+      "synthetic_95": [
+        -0.13200907227079559,
+        -0.022233234536869543
+      ]
+    },
+    {
+      "var": "consistency_susc",
+      "paper": 0.069,
+      "synthetic_mean": 0.06638542465272562,
+      "synthetic_95": [
+        0.005962546733092756,
+        0.12476817187053522
+      ]
+    },
+    {
+      "var": "anti_phish_course",
+      "paper": 0.066,
+      "synthetic_mean": 0.06520910189095666,
+      "synthetic_95": [
+        0.006868109534527105,
+        0.1236243996757102
+      ]
+    },
+    {
+      "var": "emotional_stab",
+      "paper": 0.061,
+      "synthetic_mean": 0.06418610771689318,
+      "synthetic_95": [
+        0.006400149375720584,
+        0.11848950808308878
+      ]
+    },
+    {
+      "var": "impulsivity",
+      "paper": -0.044,
+      "synthetic_mean": -0.043207484736880124,
+      "synthetic_95": [
+        -0.09818858459308201,
+        0.021748435160592872
+      ]
+    }
+  ],
+  "cluster_check": {
+    "aware_proxy_recall": 0.8122412135814399,
+    "highrisk_proxy_recall": 0.6776801811010819,
+    "paper_aware_recall": 0.783,
+    "paper_highrisk_recall": 0.688
+  },
+  "holdout_spearman_pred_vs_obs": 0.41419409086204445,
+  "holdout_mean_pred_recall": 0.7077046646559153,
+  "holdout_mean_obs_recall": 0.7085494997736885
+}
