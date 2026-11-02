@@ -89,6 +89,7 @@ def llm_scores(events, timeout=8.0):
         scores = {s: float(min(1, max(0, data["scores"].get(s, 0)))) for s in S.SCENARIOS}
         result = (scores, data.get("reasons", {}), "llm")
     except Exception as e:                     # 키 없음·네트워크·형식 오류 모두 규칙으로 대체
+        print("LLM 대체 사유 :", type(e).__name__, e, flush=True)
         scores, keys = rule_scores(events)
         reasons = rule_reasons(events)
         reasons["_error"] = f"{type(e).__name__}: {e}"      # 화면에는 표시하지 않음 (디버깅용)
