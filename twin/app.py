@@ -4,6 +4,8 @@
 
 시제품은 가상의 사용자·가상의 일정·가상의 반응 기록만 사용한다.
 """
+import os
+
 import altair as alt
 import numpy as np
 import pandas as pd
@@ -19,6 +21,13 @@ from fixed_layer import VARS, base_logit
 from simulate import DayState, DEMO_PROFILE, load_model, simulate
 
 st.set_page_config(page_title="오늘의 피싱 예보", page_icon="🛡️", layout="wide")
+
+# Streamlit Cloud: Settings → Secrets 에 ANTHROPIC_API_KEY 를 넣으면 LLM 맥락 판단이 켜진다
+try:
+    if "ANTHROPIC_API_KEY" in st.secrets and not os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+except Exception:                               # secrets 파일이 없는 로컬 실행
+    pass
 
 LEVEL_COLOR = {"평소": "#2e9d5b", "주의": "#e0a21a", "경계": "#e46a2b", "위험": "#d23b3b"}
 LEVEL_ACTION = {
@@ -36,13 +45,17 @@ SURVEY = {  # 고정층 설문 (화면 표시 이름, 최소, 최대, 단계)
     "consistency_susc": ("일관성 성향 (0~5)", 0, 5, 1), "anti_phish_course": ("피싱 교육 수강 (0/1)", 0, 1, 1),
     "emotional_stab": ("정서 안정성 (0~5)", 0, 5, 1), "impulsivity": ("충동성 (0~5)", 0, 5, 1),
 }
-PRESETS = {
+PRESETS = {   # 시연 순서: 평소 → 주의 → 경계 → 위험 (simulate.PRESETS와 같은 값)
     "평소의 날": dict(tp=0.0, stress=0, sleep=0.0, wl=0.0, events=""),
+    "마감이 몰린 날": dict(tp=0.5, stress=1, sleep=0.3, wl=0.3, events=""),
+    "택배 기다리는 날": dict(tp=0.3, stress=0, sleep=0.0, wl=0.3,
+                       events="다음 주 화요일 쿠팡 택배 도착 예정"),
     "택배 기다리며 마감 몰린 날": dict(tp=0.8, stress=2, sleep=0.3, wl=0.8,
                                  events="다음 주 화요일 쿠팡 택배 도착 예정"),
     "대출 준비 중 잠 못 잔 날": dict(tp=0.3, stress=1, sleep=1.0, wl=0.2,
                                 events="전세 계약 앞두고 대출 알아보는 중\n주말 이사"),
 }
+DEFAULT_PRESET = "택배 기다리며 마감 몰린 날"   # 첫 화면: 시뮬레이션이 움직이는 모습이 바로 보이도록
 
 
 # ---------------------------------------------------------------- 캐시된 계산
@@ -101,7 +114,7 @@ def apply_preset(name):
                             events=p["events"])
 
 
-for k, v in PRESETS["평소의 날"].items():
+for k, v in PRESETS[DEFAULT_PRESET].items():
     st.session_state.setdefault(k, v)
 
 with st.sidebar:
@@ -145,19 +158,33 @@ base_or = float(np.exp(base_logit(profile, model) - base_logit(mean_profile, mod
 base_p = float(expit(base_logit(profile, model)))
 
 
-def explain(drivers):
-    if not drivers:
+def josa(word, with_batchim, without):
+    """마지막 글자 받침에 따라 조사 선택 (예: 스미싱'이 / 안내'가)."""
+    ch = word.strip()[-1]
+    if "가" <= ch <= "힣":
+        return with_batchim if (ord(ch) - 0xAC00) % 28 else without
+    return without
+
+
+# (입력값 기준, 연결형, 이유형) — 실제로 '몰렸다·부족하다'고 말할 수 있을 때만 문장에 넣는다
+STATE_PHRASES = {
+    "시간 압박": (lambda: tp >= 0.5, "일정이 몰려 있고", "일정이 몰려 있어서"),
+    "스트레스": (lambda: stress >= 1, "스트레스가 평소보다 높고", "스트레스가 평소보다 높아서"),
+    "수면 부족": (lambda: sleep >= 0.5, "잠이 부족하고", "잠이 부족해서"),
+}
+
+
+def explain(drivers, med):
+    if not drivers or med < 1.1:
         return "평소와 비슷한 날이에요. 기본 표시만 유지할게요."
-    phrase = {"시간 압박": "일정이 몰려 있고", "스트레스": "스트레스가 평소보다 높고",
-              "수면 부족": "잠이 부족하고"}
     ctx = [k[4:] for k, _ in drivers if k.startswith("맥락: ")]
-    states = [phrase[k] for k, _ in drivers if k in phrase][:2]
+    states = [k for k, _ in drivers if k in STATE_PHRASES and STATE_PHRASES[k][0]()][:2]
     out = []
     if ctx:
-        out.append(f"요즘 일정 때문에 '{ctx[0]}'가 진짜처럼 느껴지기 쉬워요.")
+        out.append(f"요즘 일정 때문에 '{ctx[0]}'{josa(ctx[0], '이', '가')} 진짜처럼 느껴지기 쉬워요.")
     if states:
-        s = " ".join(states)
-        out.append(f"오늘은 {s[:-1]}서 서두르기 쉬운 날이에요.")
+        parts = [STATE_PHRASES[k][1] for k in states[:-1]] + [STATE_PHRASES[states[-1]][2]]
+        out.append(f"오늘은 {' '.join(parts)} 서두르기 쉬운 날이에요.")
     return " ".join(out) + " 링크와 송금 요청은 한 번 더 확인하세요."
 
 
@@ -173,10 +200,13 @@ with tab1:
     color = LEVEL_COLOR[level]
     pos = min(max((med - 1) / 2, 0), 1) * 100
     with c1:
+        top3 = [s for s in res["top3"] if s["ratio_median"] >= 1.1]
         top_html = "".join(
             f"<div style='padding:8px 0;border-top:1px solid #eee'><b>{i+1}. {s['name']}</b>"
             f"<span style='float:right;color:#666'>{s['ratio_median']:.1f}배</span></div>"
-            for i, s in enumerate(res["top3"]))
+            for i, s in enumerate(top3)) or (
+            "<div style='padding:8px 0;border-top:1px solid #eee;color:#666'>"
+            "오늘은 특별히 주의할 공격이 없어요</div>")
         st.markdown(f"""
 <div style="max-width:380px;border:10px solid #1f2633;border-radius:36px;padding:22px 18px;background:#f5f6f8">
   <div style="color:#888;font-size:13px">오늘의 피싱 예보</div>
@@ -191,7 +221,7 @@ with tab1:
       <div style="position:absolute;left:{pos}%;top:-5px;width:4px;height:20px;background:#1f2633;border-radius:2px"></div>
     </div>
     <div style="display:flex;justify-content:space-between;color:#999;font-size:11px"><span>평소</span><span>2배</span><span>3배+</span></div>
-    <div style="margin-top:12px;font-size:14px;line-height:1.5">{explain(res['drivers'])}</div>
+    <div style="margin-top:12px;font-size:14px;line-height:1.5">{explain(res['drivers'], med)}</div>
   </div>
   <div style="background:white;border-radius:16px;padding:12px 16px;margin-top:10px">
     <div style="font-weight:700;margin-bottom:4px">오늘 특히 주의할 공격</div>{top_html}
@@ -203,19 +233,26 @@ with tab1:
         m1.metric("오늘 취약도", f"{med:.2f}배", help=f"90% 범위 {lo:.2f}~{hi:.2f}배")
         m2.metric("방어 단계", level)
         m3.metric("기본 취약도(고정층)", f"{base_or:.2f}배", help="같은 조건의 평균 사용자 대비 속을 오즈 (Spamley 기반)")
-        st.caption(f"오늘 취약도 90% 범위: {lo:.2f}~{hi:.2f}배 · 기본 취약도는 평균 사용자 대비")
+        st.caption(f"오늘 취약도 90% 범위: {lo:.2f}~{hi:.2f}배 · 기본 취약도는 평균 사용자 대비 · "
+                   f"이 사람의 평소 속을 확률(추정) {base_p:.0%}")
+        st.caption("오늘 취약도는 '이 사람의 평소' 대비 값입니다. 평소 잘 속지 않는 사람일수록 같은 상태 변화에도 "
+                   "배수가 크게 나오고, 원래 취약한 사람은 배수는 작아도 절대 수준이 높습니다. "
+                   "그래서 두 값을 함께 봅니다.")
         st.markdown("**오늘 수치를 올린 요인** (속을 오즈 배수, 중앙값)")
         if res["drivers"]:
             st.dataframe(pd.DataFrame(res["drivers"], columns=["요인", "배수"]), hide_index=True,
                          width="stretch")
+            st.caption("요인 배수는 '속을 오즈' 기준이라 곱한 값이 오늘 취약도와 같지 않습니다. "
+                       "오늘 취약도는 확률 기준으로 바꾼 뒤 공격 4종을 평균한 값이고, "
+                       "맥락 요인은 맞물리는 공격에만 적용됩니다.")
         else:
             st.write("없음")
-        st.markdown(f"**맥락 판단** ({'LLM' if score_src == 'llm' else '규칙 기반'})")
+        st.markdown(f"**맥락 판단** ({'LLM' if score_src == 'llm' else '키워드 규칙 · 기기 내 경량 판단'})")
         st.dataframe(pd.DataFrame([{"공격 유형": S.SCENARIOS[k]["name"], "맞물림": round(v, 2),
                                     "이유": reasons.get(k, "")} for k, v in scores.items()]),
                      hide_index=True, width="stretch")
-        if "_fallback" in reasons:
-            st.caption(reasons["_fallback"])
+        if score_src != "llm" and event_list:
+            st.caption("LLM 연결이 없을 때는 키워드 규칙으로 자동 대체합니다 (목표 서비스는 기기 내 소형 모델).")
         st.caption(f"단계 결정: {res['level']['reason']} · 절대 확률이 아닌 '같은 사람의 평소 대비' 값입니다.")
 
 with tab2:
@@ -290,6 +327,8 @@ with tab5:
     cl = alt.Chart(pd.DataFrame({"x": [center]})).mark_rule(color="#1f2633", strokeDash=[4, 3]).encode(x="x:Q")
     st.altair_chart(tor + cl, width="stretch")
     st.caption("막대가 길수록 결과가 그 가정에 기대고 있습니다. 근거가 약한 가정이 위에 있다면 우선 검증 대상입니다.")
+    st.caption("앞 단계 통과 가정: 보이스피싱은 접근→신뢰 형성→압박→송금 요구 단계를 거칩니다. 상태 효과는 근거 연구처럼 "
+               "판단이 갈리는 '압박' 단계에만 적용하고, 나머지 단계는 '한 번 응한 사람은 다음 단계로 넘어가기 쉽다'고 가정합니다.")
 
     st.markdown("**상태층 근거표**")
     st.dataframe(pd.DataFrame([{

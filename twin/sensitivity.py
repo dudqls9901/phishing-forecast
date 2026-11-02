@@ -15,12 +15,12 @@ E = P.STATE_EFFECTS
 # (표시 이름, 근거 강도, override 키, 하한, 상한)
 ITEMS = [
     ("시간 압박 효과", "강함 (반대 연구 1건)", "tp", np.log(1.0), np.log(E["time_pressure"]["or_high"])),
-    ("스트레스 효과", "중간", "stress", np.log(E["stress"]["or_low"]), np.log(E["stress"]["or_high"])),
+    ("스트레스 효과", "약함", "stress", np.log(E["stress"]["or_low"]), np.log(E["stress"]["or_high"])),
     ("수면 부족 효과", "간접 (설계 가정)", "sleep", np.log(E["sleep_deficit"]["or_low"]), np.log(E["sleep_deficit"]["or_high"])),
     ("업무 부하 가중치", "탐색적 (설계 가정)", "wl_w", E["workload"]["context_weight_low"], E["workload"]["context_weight_high"]),
     ("맥락 일치 효과", "설계 가정", "ctx", np.log(S.CONTEXT_OR_LOW), np.log(S.CONTEXT_OR_HIGH)),
 ]
-STAGE_ITEM = ("비결정 단계 통과 보정", "설계 가정", 0.0, 2.0)
+STAGE_ITEM = ("앞 단계 통과 가정 (한 번 응하면 다음 단계로 넘어감)", "설계 가정", 0.0, 2.0)
 
 
 def _mid():

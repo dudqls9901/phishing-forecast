@@ -20,7 +20,7 @@ KEYWORDS = {
     "loan": ["대출", "전세", "대환", "신용", "주택담보", "자금"],
     "family_trip": ["가족 여행", "여행", "해외", "출국"],
     "tax": ["연말정산", "세금", "환급", "종합소득세", "건강보험"],
-    "moving": ["이사", "전입", "계약", "부동산"],
+    "moving": ["이사", "전입", "부동산"],
     "breach": ["유출", "해킹", "개인정보 사고"],
 }
 
@@ -45,11 +45,30 @@ def rule_scores(events):
     return ({s: S.context_match(s, keys) for s in S.SCENARIOS}, sorted(keys))
 
 
+def rule_reasons(events):
+    """규칙 판단의 이유: 어떤 일정 문장이 어떤 맥락으로 읽혔는지 한 문장으로."""
+    hits = {}                                   # 맥락 키 -> 처음 걸린 일정 문장
+    for e in events:
+        for k, words in KEYWORDS.items():
+            if k not in hits and any(w in e for w in words):
+                hits[k] = e
+    out = {}
+    for s, sc in S.SCENARIOS.items():
+        best = max(((sc["match"].get(k, 0.0), k) for k in hits), default=(0.0, None))
+        if best[0] > 0:
+            k = best[1]
+            how = "직접 맞물림" if best[0] >= 1 else "간접 관련"
+            out[s] = f"'{hits[k]}' → {S.CONTEXTS[k]} 맥락과 {how}"
+        else:
+            out[s] = "관련 일정 없음"
+    return out
+
+
 def llm_scores(events, timeout=8.0):
     """반환: (점수 dict, 이유 dict, 출처 'llm'|'rule')"""
     events = [e.strip() for e in events if e.strip()]
     if not events:
-        return {s: 0.0 for s in S.SCENARIOS}, {}, "rule"
+        return {s: 0.0 for s in S.SCENARIOS}, {s: "등록된 일정 없음" for s in S.SCENARIOS}, "rule"
     key = tuple(sorted(events))
     if key in _cache:
         return _cache[key]
@@ -71,8 +90,10 @@ def llm_scores(events, timeout=8.0):
         result = (scores, data.get("reasons", {}), "llm")
     except Exception as e:                     # 키 없음·네트워크·형식 오류 모두 규칙으로 대체
         scores, keys = rule_scores(events)
-        result = (scores, {"_fallback": f"규칙 기반 판단 사용 ({type(e).__name__}: {e})",
-                           "_matched": keys}, "rule")
+        reasons = rule_reasons(events)
+        reasons["_error"] = f"{type(e).__name__}: {e}"      # 화면에는 표시하지 않음 (디버깅용)
+        reasons["_matched"] = keys
+        result = (scores, reasons, "rule")
     _cache[key] = result
     return result
 
@@ -81,5 +102,5 @@ if __name__ == "__main__":
     for evs in (["다음 주 화요일 쿠팡 택배 도착 예정"], ["전세 계약 앞두고 대출 알아보는 중", "주말 이사"]):
         s, r, src = llm_scores(evs)
         print(evs, "→", src, {k: round(v, 2) for k, v in s.items()})
-        if "_fallback" in r:
-            print("   ", r["_fallback"])
+        if "_error" in r:
+            print("    규칙 대체:", r["_error"])

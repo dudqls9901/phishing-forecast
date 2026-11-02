@@ -8,6 +8,11 @@ streamlit run app.py       # 대시보드
 ```
 맥락 판단에 LLM을 쓰려면 `ANTHROPIC_API_KEY` 환경 변수를 설정. 없으면 키워드 규칙으로 자동 대체.
 
+Streamlit Community Cloud: 앱 → Settings → Secrets 에 아래 한 줄을 넣고 저장하면 재시작 후 LLM 판단이 켜진다.
+```
+ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
 ## 파일
 | 파일 | 역할 |
 |---|---|

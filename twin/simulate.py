@@ -138,12 +138,14 @@ DEMO_PROFILE = {   # 가상 사용자: 20대 직장 초년생 (실제 인물 아
     "emotional_stab": 3, "impulsivity": 3,
 }
 
-PRESETS = {
+PRESETS = {   # 시연 순서: 평소 → 주의 → 경계 → 위험 (단계가 바뀌는 모습을 보여주기 위함)
     "평소의 날": DayState(),
+    "마감이 몰린 날": DayState(time_pressure=0.5, stress=1, sleep_deficit=0.3, workload=0.3),
+    "택배 기다리는 날": DayState(time_pressure=0.3, workload=0.3, contexts=["parcel"]),
     "택배 기다리며 마감 몰린 날": DayState(time_pressure=0.8, stress=2, sleep_deficit=0.3,
                                     workload=0.8, contexts=["parcel"]),
     "대출 준비 중 잠 못 잔 날": DayState(time_pressure=0.3, stress=1, sleep_deficit=1.0,
-                                  workload=0.2, contexts=["loan"]),
+                                  workload=0.2, contexts=["loan", "moving"]),
 }
 
 

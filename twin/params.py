@@ -70,7 +70,7 @@ STATE_EFFECTS = {
     "stress": {
         "or_low": 1.0, "or_high": 1.3, "dist": "uniform",
         "unit": "자가 체크 1점당",
-        "strength": "중간",
+        "strength": "약함",           # 기획서 표기와 통일 (원문 수치 미확인)
         "basis": "출처값: Fallon et al. (2023), J. Information Warfare 22(2):67-85. "
                  "직원 153명 현장 연구, 업무 스트레스 1점당 반응 가능성 15% 증가 (보도자료 기준).",
         "todo": "원문 척도 범위(몇 점 만점)와 OR 신뢰구간 확인 필요",
