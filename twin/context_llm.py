@@ -64,7 +64,7 @@ def rule_reasons(events):
     return out
 
 
-def llm_scores(events, timeout=8.0):
+def llm_scores(events, timeout=20.0):
     """반환: (점수 dict, 이유 dict, 출처 'llm'|'rule')"""
     events = [e.strip() for e in events if e.strip()]
     if not events:
@@ -81,10 +81,10 @@ def llm_scores(events, timeout=8.0):
             f"- {k}: {v['name']} / 설득 원리: {', '.join(v['principles'])}" for k, v in S.SCENARIOS.items())
         client = anthropic.Anthropic(timeout=timeout)
         msg = client.messages.create(
-            model=MODEL, max_tokens=600,
+            model=MODEL, max_tokens=2000,
             messages=[{"role": "user", "content": PROMPT.format(
                 events="\n".join(f"- {e}" for e in events), scenarios=sc_desc)}])
-        text = msg.content[0].text
+        text = "".join(b.text for b in msg.content if b.type == "text")
         data = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
         scores = {s: float(min(1, max(0, data["scores"].get(s, 0)))) for s in S.SCENARIOS}
         result = (scores, data.get("reasons", {}), "llm")
