@@ -2,7 +2,7 @@
 
 ## 실행
 ```
-pip install -r requirements.txt streamlit altair
+pip install -r requirements.txt
 python fixed_layer.py      # 고정층 학습 (약 13초, fixed_layer_model.json 생성. 이미 있으면 생략 가능)
 streamlit run app.py       # 대시보드
 ```
@@ -23,7 +23,9 @@ ANTHROPIC_API_KEY = "sk-ant-..."
 | simulate.py | 1,000회 반복 시뮬레이션, 방어 단계 결정, 시연 프리셋 |
 | bayes_update.py | 현실과의 동기화: 반응 기록으로 개인 효과 갱신 |
 | sensitivity.py | 민감도 분석 |
-| app.py | Streamlit 대시보드 (5개 탭) |
+| app.py | 시연 화면: 앞면(상태 3개·폰·메시지 카드) / 폰을 누르면 뒷면(근거 5개 탭) |
+| stage.py | 앞면 무대 컴포넌트 (st.components.v2) |
+| app_legacy.py | 이전 대시보드 (사이드바 + 6개 탭), 백업용 |
 
 ## 단독 실행 점검
 ```

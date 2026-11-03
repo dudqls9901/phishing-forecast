@@ -158,6 +158,63 @@ def llm_profile(memo, timeout=30.0):
     return {"survey": survey, "reasons": data.get("reasons") or {}, "events": events}
 
 
+# ---------------------------------------------------------------- 직접 입력한 문자 -> 공격 유형 분류
+# 문자 자체의 위험도를 판정하지 않는다. 어떤 공격 '유형'인지만 고르고,
+# 그 유형에 오늘 이 사람이 얼마나 약한지는 시뮬레이션이 계산한다.
+MSG_KEYWORDS = {
+    "parcel_smishing": ["택배", "배송", "주소", "우체국", "반송", "통관", "운송장", "쿠팡", "CJ", "한진",
+                        "로젠", "과태료", "환급", "건강보험", "국민연금", "범칙금"],
+    "family_impersonation": ["엄마", "아빠", "딸", "아들", "액정", "폰 고장", "폰이 고장", "휴대폰 고장",
+                             "상품권", "대신 결제", "이 번호로", "급하게"],
+    "loan_fraud": ["대출", "대환", "금리", "캐피탈", "한도", "저금리", "신용등급", "정부지원"],
+    "gov_impersonation": ["검찰", "경찰", "금감원", "금융감독원", "수사", "명의", "도용", "사건", "출석",
+                          "범죄", "지검"],
+}
+
+CLASSIFY_PROMPT = """너는 보안 앱의 '공격 유형 분류' 모듈이다. 사용자가 받은 문자 한 건이 주어진다.
+아래 사기 시나리오 유형 중 구조가 가장 비슷한 것 하나의 키를 골라라. 어느 것과도 맞지 않으면 "none".
+문자·통화 문구는 절대 작성하지 말고, 아래 JSON 형식으로만 답하라.
+{{"type": "<시나리오키 또는 none>", "reason": "한 문장 이유"}}
+
+[시나리오 유형]
+{scenarios}
+
+[받은 문자]
+{text}"""
+
+_cls_cache = {}
+
+
+def rule_classify(text):
+    """키워드 규칙: 가장 많이 걸린 유형 (없으면 None)."""
+    hits = {k: sum(w in text for w in words) for k, words in MSG_KEYWORDS.items()}
+    best = max(hits, key=hits.get)
+    if hits[best] == 0:
+        return None, "등록된 공격 유형의 단서가 없음"
+    words = [w for w in MSG_KEYWORDS[best] if w in text][:3]
+    return best, f"'{', '.join(words)}' 단서"
+
+
+def classify_message(text, timeout=15.0):
+    """반환: (시나리오 키 또는 None, 이유, 출처 'llm'|'rule')"""
+    text = text.strip()[:300]
+    if text in _cls_cache:
+        return _cls_cache[text]
+    try:
+        sc_desc = "\n".join(f"- {k}: {v['name']} / 설득 원리: {', '.join(v['principles'])}"
+                            for k, v in S.SCENARIOS.items())
+        data = call_llm(CLASSIFY_PROMPT.format(scenarios=sc_desc, text=text), timeout, max_tokens=400)
+        t = data.get("type")
+        key = t if t in S.SCENARIOS else None
+        result = (key, str(data.get("reason", ""))[:120], "llm")
+        _cls_cache[text] = result
+    except Exception as e:                     # 키 없음·네트워크·형식 오류 -> 키워드 규칙
+        print("문자 분류 규칙 대체 :", type(e).__name__, e, flush=True)
+        key, why = rule_classify(text)
+        result = (key, why, "rule")
+    return result
+
+
 if __name__ == "__main__":
     for evs in (["다음 주 화요일 쿠팡 택배 도착 예정"], ["전세 계약 앞두고 대출 알아보는 중", "주말 이사"]):
         s, r, src, ctx = llm_scores(evs)
