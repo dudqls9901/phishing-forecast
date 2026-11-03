@@ -13,7 +13,7 @@ HTML = """<div id="stage"></div>"""
 CSS = """
 :host{display:block}
 *{box-sizing:border-box}
-#stage{font-family:inherit;color:#1f2633}
+#stage{font-family:inherit;color:#1f2633;word-break:keep-all}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 320px minmax(0,1fr);gap:28px;align-items:start}
 .colh{font-size:14px;color:#6b7280;margin:0 0 10px;font-weight:600;letter-spacing:.02em}
 .preset{display:block;width:100%;text-align:left;border:1.5px solid #dfe3ea;background:#fff;border-radius:14px;
@@ -27,7 +27,8 @@ CSS = """
 .wx .emo{font-size:52px;line-height:1}
 .wx .name{font-size:15px;color:#4b5563}
 .wx .val{font-size:34px;font-weight:800;line-height:1.15;transition:color .5s}
-.wx .val small{font-size:15px;font-weight:600;color:#4b5563}
+.wx .val small{display:block;font-size:13px;font-weight:600;color:#4b5563}
+.wx .emo{flex:none}
 .wx .why{font-size:14px;line-height:1.55;margin-top:10px;color:#374151}
 .phone-wrap{perspective:1200px}
 .phone{width:300px;min-height:560px;margin:0 auto;border:12px solid #1f2633;border-radius:42px;background:#f5f6f8;
@@ -65,9 +66,10 @@ CSS = """
 .custom label{font-size:16px;font-weight:700;display:block;margin-bottom:8px}
 .custom textarea{width:100%;height:62px;border:1px solid #d1d5db;border-radius:10px;padding:8px;font:inherit;font-size:14px;resize:none}
 .custom .row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
-.custom button{border:0;background:#1f2633;color:#fff;border-radius:10px;padding:8px 16px;font:inherit;font-size:14px;cursor:pointer}
+.custom button{flex:none;white-space:nowrap;border:0;background:#1f2633;color:#fff;border-radius:10px;padding:8px 16px;font:inherit;font-size:14px;cursor:pointer}
 .custom .st{font-size:12.5px;color:#4b5563;line-height:1.4}
 .custom .err{color:#d23b3b}
+@media (max-width:1100px){.wx .emo{font-size:40px}.wx .val{font-size:30px}}
 @media (max-width:900px){
   .grid{grid-template-columns:minmax(0,1fr);gap:18px}
   .phone{width:min(300px,100%);min-height:520px}
@@ -151,7 +153,7 @@ export default function(component){
     wxEmo.textContent = tl.emoji;
     wxName.textContent = '오늘은 ' + tl.weather + ' · ' + tl.name;
     wxVal.textContent = ''; wxVal.style.color = tl.color;
-    wxVal.appendChild(document.createTextNode(P.today.toFixed(1) + '배 '));
+    wxVal.appendChild(document.createTextNode(P.today.toFixed(1) + '배'));
     wxVal.appendChild(el('small',null,'평소 대비 (모든 유형 평균)'));
     wxWhy.textContent = P.explain;
 
