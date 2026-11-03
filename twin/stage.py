@@ -159,7 +159,7 @@ export default function(component){
 
     if (D.custom && !UI.pending){
       const c = D.custom;
-      cuSt.textContent = c.key ? ('→ ' + c.name + (c.src==='llm' ? ' (AI 판단)' : ' (키워드 규칙)')) : '→ 등록된 공격 유형과 맞지 않아요';
+      cuSt.textContent = c.key ? ('→ ' + c.name + (c.src==='llm' ? ' (AI 판단)' : ' (키워드 규칙)')) : ('→ 공격 유형 아님' + (c.src==='llm' ? ' (AI 판단)' : ' (키워드 규칙)'));
     }
 
     // 폰 화면
@@ -174,8 +174,13 @@ export default function(component){
       const n = el('div','noti' + (newMsg ? ' new' : '')); n.appendChild(el('div','from',card.from)); n.appendChild(el('div','txt',card.text)); ph.appendChild(n);
       const mt = el('div','meter'); ph.appendChild(mt);
       if (!key){
-        mt.appendChild(el('div','lb','등록된 공격 유형과 맞지 않아요'));
-        mt.appendChild(el('div','rng','이 시제품은 택배·가족 사칭·대환대출·기관 사칭 4가지 유형만 다뤄요'));
+        const ok = D.levels[0];
+        mt.appendChild(el('div','lb','판단 결과'));
+        const big = el('div','big','공격 유형 아님'); big.style.color = ok.color; big.style.fontSize = '34px'; big.style.margin = '8px 0 4px'; mt.appendChild(big);
+        const pl = el('span','pill','개입 없음'); pl.style.background = ok.color; mt.appendChild(pl);
+        const ai = el('div','ai'); ai.style.background = ok.bg; ph.appendChild(ai);
+        const who = el('div','who','AI 비서'); who.style.color = ok.color; ai.appendChild(who);
+        ai.appendChild(el('div',null,'알려진 사기 유형과 맞지 않아요. 따로 개입하지 않을게요.'));
       } else {
         const s = P.scen[key], l = lv(s.mult);
         mt.appendChild(el('div','lb', D.names[key] + ' · 평소 대비'));
