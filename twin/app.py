@@ -137,6 +137,25 @@ def apply_memo():
     st.session_state["auto_profile"] = out
 
 
+DEMO_EVENTS = {   # 발표장 컴퓨터에서 타이핑 없이 맥락층 시연 (가상 문장)
+    "택배": "다음 주 화요일 쿠팡 택배 도착 예정",
+    "은행 상담": "집 넓혀 가려고 은행 상담 다니는 중",
+    "딸 출국": "딸이 다음 주 호주로 워킹홀리데이 떠남",
+}
+
+
+def set_events(text):
+    st.session_state["events"] = text
+
+
+def load_presenter_memo():
+    """발표자 본인 메모는 저장소가 아니라 Streamlit Secrets(PRESENTER_MEMO)에서만 읽는다."""
+    try:
+        st.session_state["memo"] = st.secrets["PRESENTER_MEMO"]
+    except Exception:
+        st.session_state["memo_missing"] = True
+
+
 def reset_profile():
     for v in SURVEY:
         st.session_state[f"pf_{v}"] = int(DEMO_PROFILE[v])
@@ -169,6 +188,9 @@ with st.sidebar:
 
     st.markdown("### 요즘 일정 (맥락)")
     events = st.text_area("한 줄에 하나씩", key="events", height=90)
+    q1, q2, q3 = st.columns(3)
+    for col, (label, text) in zip((q1, q2, q3), DEMO_EVENTS.items()):
+        col.button(label, on_click=set_events, args=(text,), width="stretch", key=f"ev_{label}")
 
     auto = st.session_state.get("auto_profile")
     with st.expander("고정층 설문 (AI 초안 반영됨 · 확인·수정)" if auto and "survey" in auto
@@ -404,6 +426,16 @@ with tab6:
     st.caption("개인 AI 비서가 기억하는 메모를 읽어 고정층 설문 초안과 요즘 일정을 채웁니다. "
                "LLM은 초안만 만들고, 사용자가 확인·수정한 값으로 통계 모델이 취약도를 계산합니다.")
     st.text_area("AI 비서 메모 (시연은 가상 인물)", key="memo", height=250)
+    has_pm = False
+    try:
+        has_pm = "PRESENTER_MEMO" in st.secrets
+    except Exception:
+        pass
+    if has_pm:
+        m1, m2 = st.columns(2)
+        m1.button("가상 인물 메모", on_click=lambda: st.session_state.update(memo=SAMPLE_MEMO),
+                  width="stretch")
+        m2.button("발표자 본인 메모 (동의한 부분만)", on_click=load_presenter_memo, width="stretch")
     b1, b2 = st.columns(2)
     with b1:
         st.button("트윈 자동 생성", on_click=apply_memo, type="primary", width="stretch")
