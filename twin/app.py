@@ -429,5 +429,59 @@ with tab6:
                 st.markdown(f"- {e}")
             st.metric("기본 취약도(고정층)", f"{base_or:.2f}배", help="평균 사용자 대비 속을 오즈")
             st.metric("오늘 취약도", f"{med:.2f}배 · {level}")
+    # ------------------------------------------------ 왜 이 값이 나왔나 (층별 설명)
+    st.divider()
+    st.markdown("**왜 이 값이 나왔나** — 세 층이 각각 무엇을 바꿨는지")
+    filled = auto.get("survey", {}) if auto and "survey" in auto else {}
+    x_now = np.array([profile[v] for v in VARS], dtype=float)
+    parts = model["coef_mean"] * (x_now - model["mu"]) / model["sd"]   # 항목별 log-OR, 합 = log(기본 취약도)
+    fx = []
+    for j, v in enumerate(VARS):
+        if abs(parts[j]) < 0.02:
+            continue
+        o = float(np.exp(parts[j]))
+        fx.append((abs(parts[j]), {
+            "항목": SURVEY[v][0] + (" ✦" if v in filled else ""),
+            "입력값": int(profile[v]), "평균 사용자": round(float(model["mu"][j]), 1),
+            "영향": f"{o:.2f}배 · {'덜 속는 쪽' if o < 1 else '더 속는 쪽'}"}))
+    fx = [r for _, r in sorted(fx, key=lambda t: -t[0])]
+
+    w1, w2, w3 = st.columns(3, gap="medium")
+    with w1:
+        st.markdown(f"**① 고정층 · 어떤 사람인가**  \n평균 사용자 대비 **{base_or:.2f}배**")
+        if fx:
+            st.dataframe(pd.DataFrame(fx), hide_index=True, width="stretch")
+        st.caption("Spamley 공개 통계로 학습한 로지스틱 회귀 계수 × (입력값 − 평균). "
+                   "항목별 배수를 모두 곱하면 기본 취약도가 됩니다(영향이 아주 작은 항목은 생략). "
+                   + ("✦ = 메모로 채운 항목, 나머지는 기본값." if filled else ""))
+    with w2:
+        st.markdown("**② 상태층 · 오늘 컨디션**  \n사이드바 입력값")
+        st_drv = {k: v for k, v in res["drivers"] if not k.startswith("맥락: ")}
+        srows = [("시간 압박", f"{tp:.1f}"), ("스트레스", f"+{stress}"),
+                 ("수면 부족", f"{sleep:.1f}"), ("업무량", f"{wl:.1f}")]
+        st.dataframe(pd.DataFrame([{"상태": n, "입력값": val,
+                                    "속을 오즈": f"{st_drv[n]:.2f}배" if n in st_drv else
+                                    ("맥락 효과에 반영" if n == "업무량" and any(v >= 0.5 for v in scores.values())
+                                     else "영향 없음")}
+                                   for n, val in srows]), hide_index=True, width="stretch")
+        st.caption("상태는 매일 바뀌어서 메모에서 읽지 않습니다. 목표 서비스는 캘린더 일정 밀도·수면 기록·"
+                   "하루 한 번 스트레스 체크에서 받고, 시연은 사이드바로 입력합니다. "
+                   "업무량은 단독이 아니라 맥락 효과를 키우는 쪽으로 작동합니다.")
+    with w3:
+        st.markdown("**③ 맥락층 · 요즘 일정**  \n일정과 맞물린 공격")
+        hit = [(S.SCENARIOS[k]["name"], v, reasons.get(k, "")) for k, v in scores.items() if v >= 0.5]
+        if hit:
+            for name, v, why in sorted(hit, key=lambda t: -t[1]):
+                st.markdown(f"- **{name}** (맞물림 {v:.1f})" + (f"  \n  {why}" if why else ""))
+        else:
+            st.markdown("- 맞물리는 공격 없음 → 맥락 효과 0")
+        st.caption("LLM은 일정과 공격 유형이 얼마나 맞물리는지만 0~1로 판단하고, 확률 계산에는 관여하지 않습니다.")
+
+    note = ("평소 잘 속지 않는 편이라, 같은 상태 변화에도 평소 대비 배수가 크게 나옵니다."
+            if base_or < 0.9 else "원래 취약한 편이라 배수는 작아도 절대 수준이 높습니다."
+            if base_or > 1.1 else "기본 취약도는 평균 사용자와 비슷한 수준입니다.")
+    note += f" (이 사람의 평소 속을 확률 추정 {base_p:.0%})"
+    st.info(f"**결론** · 오늘 취약도 **{med:.2f}배**(90% 범위 {lo:.2f}~{hi:.2f}배)는 이 사람의 평소 대비 값입니다. "
+            f"{note} 단계 기준(1.25 / 1.6 / 2.2배)에 따라 **{level}** · {res['level']['reason']}.")
     st.caption("※ 시연은 가상 인물 메모만 사용합니다. 목표 서비스에서는 사용자의 AI 비서가 기기 안에서 처리하고, "
                "메모 원문이 아닌 설문 초안만 트윈에 넘깁니다. 메모로 추정한 값이 실제 설문과 얼마나 맞는지는 아직 검증 전입니다.")
