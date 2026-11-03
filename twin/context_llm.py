@@ -9,6 +9,7 @@
 import json
 import os
 import re
+import time
 
 import scenarios as S
 
@@ -29,14 +30,33 @@ PROMPT = """너는 보안 앱의 맥락 판단 모듈이다. 사용자가 등록
 - 1.0: 시나리오 전제가 사용자 일정과 직접 맞물림 (예: 택배를 기다리는 사람에게 배송 보류 안내)
 - 0.5: 간접적으로 관련 있음
 - 0.0: 관련 없음
+또한 일정에 해당하는 맥락 키를 아래 [맥락 키]에서 모두 골라 contexts에 넣어라 (해당 없으면 빈 목록).
 문자·통화 문구는 절대 작성하지 말고, 아래 JSON 형식으로만 답하라.
-{{"scores": {{"<시나리오키>": 점수, ...}}, "reasons": {{"<시나리오키>": "한 문장 이유", ...}}}}
+{{"scores": {{"<시나리오키>": 점수, ...}}, "reasons": {{"<시나리오키>": "한 문장 이유", ...}}, "contexts": ["<맥락키>", ...]}}
 
 [사용자 일정]
 {events}
 
 [시나리오 구조]
-{scenarios}"""
+{scenarios}
+
+[맥락 키]
+{contexts}"""
+
+FAIL_TTL = 60          # 실패 결과는 60초만 기억 (일시적 네트워크 오류가 계속 남지 않도록)
+_fail_cache = {}
+
+
+def call_llm(prompt, timeout=20.0, max_tokens=2000):
+    """LLM 호출 -> 응답 속 JSON(dict). 키 없음·네트워크·형식 오류는 예외로 올린다."""
+    import anthropic
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("API 키 없음")
+    client = anthropic.Anthropic(timeout=timeout)
+    msg = client.messages.create(model=MODEL, max_tokens=max_tokens,
+                                 messages=[{"role": "user", "content": prompt}])
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    return json.loads(re.search(r"\{.*\}", text, re.S).group(0))
 
 
 def rule_scores(events):
@@ -65,43 +85,82 @@ def rule_reasons(events):
 
 
 def llm_scores(events, timeout=20.0):
-    """반환: (점수 dict, 이유 dict, 출처 'llm'|'rule')"""
+    """반환: (점수 dict, 이유 dict, 출처 'llm'|'rule', 맥락 키 목록)"""
     events = [e.strip() for e in events if e.strip()]
     if not events:
-        return {s: 0.0 for s in S.SCENARIOS}, {s: "등록된 일정 없음" for s in S.SCENARIOS}, "rule"
+        return ({s: 0.0 for s in S.SCENARIOS}, {s: "등록된 일정 없음" for s in S.SCENARIOS}, "rule", [])
     key = tuple(sorted(events))
     if key in _cache:
         return _cache[key]
+    if key in _fail_cache and time.time() - _fail_cache[key][0] < FAIL_TTL:
+        return _fail_cache[key][1]
 
     try:
-        import anthropic
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError("API 키 없음")
         sc_desc = "\n".join(
             f"- {k}: {v['name']} / 설득 원리: {', '.join(v['principles'])}" for k, v in S.SCENARIOS.items())
-        client = anthropic.Anthropic(timeout=timeout)
-        msg = client.messages.create(
-            model=MODEL, max_tokens=2000,
-            messages=[{"role": "user", "content": PROMPT.format(
-                events="\n".join(f"- {e}" for e in events), scenarios=sc_desc)}])
-        text = "".join(b.text for b in msg.content if b.type == "text")
-        data = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+        ctx_desc = "\n".join(f"- {k}: {v}" for k, v in S.CONTEXTS.items())
+        data = call_llm(PROMPT.format(events="\n".join(f"- {e}" for e in events),
+                                      scenarios=sc_desc, contexts=ctx_desc), timeout)
         scores = {s: float(min(1, max(0, data["scores"].get(s, 0)))) for s in S.SCENARIOS}
-        result = (scores, data.get("reasons", {}), "llm")
+        contexts = sorted(c for c in data.get("contexts", []) if c in S.CONTEXTS)
+        result = (scores, data.get("reasons", {}), "llm", contexts)
+        _cache[key] = result                   # 성공한 결과만 계속 기억
     except Exception as e:                     # 키 없음·네트워크·형식 오류 모두 규칙으로 대체
         print("LLM 대체 사유 :", type(e).__name__, e, flush=True)
         scores, keys = rule_scores(events)
         reasons = rule_reasons(events)
         reasons["_error"] = f"{type(e).__name__}: {e}"      # 화면에는 표시하지 않음 (디버깅용)
-        reasons["_matched"] = keys
-        result = (scores, reasons, "rule")
-    _cache[key] = result
+        result = (scores, reasons, "rule", keys)
+        _fail_cache[key] = (time.time(), result)
     return result
+
+
+# ---------------------------------------------------------------- AI 비서 메모 -> 트윈 초안
+PROFILE_PROMPT = """너는 보안 앱의 '디지털 트윈 초기 설정' 모듈이다. 사용자의 AI 비서가 기억하고 있는 메모가 주어진다.
+1) 아래 설문 항목마다, 메모에 근거가 있을 때만 값을 추정하라. 근거가 없으면 null로 둔다. 추측으로 채우지 마라.
+2) 메모에서 '요즘 진행 중이거나 곧 있을 일'을 한 줄짜리 문장으로 최대 5개 뽑아라. 이미 끝난 일은 제외한다.
+건강·종교·정치 성향 등 민감한 내용은 추정하지 말고, 문자·통화 문구는 절대 작성하지 마라.
+아래 JSON 형식으로만 답하라.
+{{"survey": {{"<항목키>": 값 또는 null, ...}}, "reasons": {{"<항목키>": "메모 속 근거 한 문장", ...}}, "events": ["...", ...]}}
+
+[설문 항목] (키: 설명, 범위)
+{items}
+
+[AI 비서 메모]
+{memo}"""
+
+PROFILE_ITEMS = {   # 키: (설명, 최소, 최대)
+    "age": ("나이", 18, 75),
+    "job_experience": ("일한 경력(년)", 0, 40),
+    "cs_knowledge": ("컴퓨터·스마트폰 지식, 0=전혀 없음 5=전문가", 0, 5),
+    "education": ("학력, 1=고졸 이하 2=전문대·재학 3=대졸 4=대학원", 1, 4),
+    "self_confidence": ("피싱을 구별할 수 있다는 자신감, 0~5", 0, 5),
+    "authority_suscept": ("기관·윗사람 요청에 따르는 정도, 0~5", 0, 5),
+    "agreeableness": ("친화성(남을 잘 믿고 협조적), 0~5", 0, 5),
+    "prior_attack": ("피싱·스미싱 피해 경험, 0=없음 1=있음", 0, 1),
+    "consistency_susc": ("한번 한 약속·결정을 끝까지 지키려는 성향, 0~5", 0, 5),
+    "anti_phish_course": ("피싱 예방 교육 수강, 0=없음 1=있음", 0, 1),
+    "emotional_stab": ("정서 안정성, 0~5", 0, 5),
+    "impulsivity": ("충동성(확인 전에 먼저 행동), 0~5", 0, 5),
+}
+
+
+def llm_profile(memo, timeout=30.0):
+    """반환: {"survey": {키: 정수}, "reasons": {키: 문장}, "events": [문장]} — 근거 없는 항목은 survey에서 빠진다."""
+    items = "\n".join(f"- {k}: {d} ({lo}~{hi})" for k, (d, lo, hi) in PROFILE_ITEMS.items())
+    data = call_llm(PROFILE_PROMPT.format(items=items, memo=memo.strip()), timeout, max_tokens=3000)
+    survey = {}
+    for k, (_, lo, hi) in PROFILE_ITEMS.items():
+        v = (data.get("survey") or {}).get(k)
+        if isinstance(v, (int, float)):
+            survey[k] = int(round(min(hi, max(lo, v))))
+    events = [str(e).strip() for e in (data.get("events") or []) if str(e).strip()][:5]
+    return {"survey": survey, "reasons": data.get("reasons") or {}, "events": events}
 
 
 if __name__ == "__main__":
     for evs in (["다음 주 화요일 쿠팡 택배 도착 예정"], ["전세 계약 앞두고 대출 알아보는 중", "주말 이사"]):
-        s, r, src = llm_scores(evs)
+        s, r, src, ctx = llm_scores(evs)
         print(evs, "→", src, {k: round(v, 2) for k, v in s.items()})
         if "_error" in r:
             print("    규칙 대체:", r["_error"])

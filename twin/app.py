@@ -16,7 +16,7 @@ import params as P
 import scenarios as S
 import sensitivity
 from bayes_update import update, synthetic_log, describe
-from context_llm import llm_scores, rule_scores
+from context_llm import llm_scores, llm_profile, rule_scores, PROFILE_ITEMS
 from fixed_layer import VARS, base_logit
 from simulate import DayState, DEMO_PROFILE, load_model, simulate
 
@@ -80,8 +80,8 @@ def run_sim(profile_t, tp, stress, sleep, wl, ctx_keys, scores_t, tp_null, perso
     return res
 
 
-@st.cache_data(show_spinner=False)
 def get_scores(events_t):
+    # 캐시는 context_llm 안에서 관리: 성공은 계속, 실패는 60초만 기억 (일시적 오류가 남지 않도록)
     return llm_scores(list(events_t))
 
 
@@ -107,6 +107,42 @@ def personalization_curve(profile_t, tp, stress, sleep, wl, ctx_keys, scores_t):
     return pd.DataFrame(rows), describe(update([], b)), describe(last)
 
 
+# ---------------------------------------------------------------- AI 비서 메모 -> 트윈 초안
+SAMPLE_MEMO = """[AI 비서 메모 예시 · 가상 인물]
+- 52세, 동네에서 18년째 작은 식당을 운영함
+- 스마트폰은 카톡과 배달앱 정도만 쓰고, 앱 설정은 딸이 대신 해 줌
+- 고등학교 졸업
+- 은행이나 관공서에서 연락이 오면 일단 시키는 대로 하는 편이라고 말함
+- 작년에 '주소 확인' 문자 링크를 눌렀다가 카드를 재발급한 적 있음
+- 보안 교육은 받아 본 적 없음
+- 한 번 하겠다고 한 일은 끝까지 하는 성격
+- 성격이 급해서 확인하기 전에 먼저 움직이는 편
+- 요즘 가게를 넓히려고 은행 상담을 다니는 중
+- 딸이 다음 주에 호주로 워킹홀리데이를 떠남"""
+
+
+def apply_memo():
+    """메모 -> LLM이 설문 초안·일정 추출 -> 사이드바 값에 반영 (사용자가 확인·수정 후 통계 모델이 계산)."""
+    memo = st.session_state.get("memo", "")
+    try:
+        out = llm_profile(memo)
+    except Exception as e:
+        print("트윈 자동 생성 실패 :", type(e).__name__, e, flush=True)
+        st.session_state["auto_profile"] = {"error": f"{type(e).__name__}"}
+        return
+    for k, v in out["survey"].items():
+        st.session_state[f"pf_{k}"] = v
+    if out["events"]:
+        st.session_state["events"] = "\n".join(out["events"])
+    st.session_state["auto_profile"] = out
+
+
+def reset_profile():
+    for v in SURVEY:
+        st.session_state[f"pf_{v}"] = int(DEMO_PROFILE[v])
+    st.session_state.pop("auto_profile", None)
+
+
 # ---------------------------------------------------------------- 사이드바 입력
 def apply_preset(name):
     p = PRESETS[name]
@@ -116,6 +152,9 @@ def apply_preset(name):
 
 for k, v in PRESETS[DEFAULT_PRESET].items():
     st.session_state.setdefault(k, v)
+for v in SURVEY:
+    st.session_state.setdefault(f"pf_{v}", int(DEMO_PROFILE[v]))
+st.session_state.setdefault("memo", SAMPLE_MEMO)
 
 with st.sidebar:
     st.markdown("### 시연 프리셋")
@@ -131,10 +170,16 @@ with st.sidebar:
     st.markdown("### 요즘 일정 (맥락)")
     events = st.text_area("한 줄에 하나씩", key="events", height=90)
 
-    with st.expander("고정층 설문 (가상 사용자)"):
+    auto = st.session_state.get("auto_profile")
+    with st.expander("고정층 설문 (AI 초안 반영됨 · 확인·수정)" if auto and "survey" in auto
+                     else "고정층 설문 (가상 사용자)", expanded=bool(auto and "survey" in auto)):
         profile = {}
         for v, (label, lo, hi, step) in SURVEY.items():
-            profile[v] = st.slider(label, lo, hi, int(DEMO_PROFILE[v]), step, key=f"pf_{v}")
+            mark = " ✦" if auto and v in auto.get("survey", {}) else ""
+            profile[v] = st.slider(label + mark, lo, hi, step=step, key=f"pf_{v}")
+        if auto and "survey" in auto:
+            st.caption("✦ = AI 비서 메모로 채운 항목")
+        st.button("가상 사용자 기본값으로", on_click=reset_profile, width="stretch")
 
     st.markdown("### 옵션")
     tp_null = st.toggle("시간 압박 효과 없음 가정 (Black & Sarno 2023)")
@@ -142,8 +187,11 @@ with st.sidebar:
 
 # ---------------------------------------------------------------- 계산
 event_list = tuple(e for e in events.splitlines() if e.strip())
-scores, reasons, score_src = get_scores(event_list)
-_, ctx_keys = rule_scores(list(event_list))
+with st.spinner("AI 비서가 요즘 일정을 읽는 중…"):
+    scores, reasons, score_src, llm_ctx = get_scores(event_list)
+rule_sc, rule_keys = rule_scores(list(event_list))
+# 단계 상향(잃을 것이 큰 시기) 판단: 키워드에 안 걸려도 LLM이 읽어낸 맥락(대출·이사 등)을 함께 사용
+ctx_keys = sorted(set(rule_keys) | set(llm_ctx))
 profile_t = tuple(sorted(profile.items()))
 scores_t = tuple(sorted(scores.items()))
 args = (profile_t, tp, stress, sleep, wl, tuple(ctx_keys), scores_t)
@@ -192,8 +240,8 @@ def explain(drivers, med):
 st.markdown("## 🛡️ 오늘의 피싱 예보")
 st.caption("상태 적응형 사회공학 디지털 트윈 · 시제품은 가상 사용자와 가상 기록만 사용합니다")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["오늘의 예보", "시뮬레이션", "방어 단계", "개인화(동기화)", "근거·민감도"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["오늘의 예보", "시뮬레이션", "방어 단계", "개인화(동기화)", "근거·민감도", "AI 비서 연동"])
 
 with tab1:
     c1, c2 = st.columns([1, 1.2], gap="large")
@@ -248,11 +296,23 @@ with tab1:
         else:
             st.write("없음")
         st.markdown(f"**맥락 판단** ({'LLM' if score_src == 'llm' else '키워드 규칙 · 기기 내 경량 판단'})")
-        st.dataframe(pd.DataFrame([{"공격 유형": S.SCENARIOS[k]["name"], "맞물림": round(v, 2),
-                                    "이유": reasons.get(k, "")} for k, v in scores.items()]),
-                     hide_index=True, width="stretch")
-        if score_src != "llm" and event_list:
-            st.caption("LLM 연결이 없을 때는 키워드 규칙으로 자동 대체합니다 (목표 서비스는 기기 내 소형 모델).")
+        rows = []
+        for k, v in scores.items():
+            row = {"공격 유형": S.SCENARIOS[k]["name"], "맞물림": round(v, 2)}
+            if score_src == "llm":
+                row["키워드 규칙이었다면"] = round(rule_sc[k], 2)
+            row["이유"] = reasons.get(k, "")
+            rows.append(row)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        if score_src == "llm":
+            missed = [S.SCENARIOS[k]["name"] for k, v in scores.items() if v >= 0.5 and rule_sc[k] < 0.5]
+            if missed:
+                st.caption(f"키워드 규칙은 놓쳤지만 LLM이 문장의 뜻으로 읽어낸 공격: {', '.join(missed)}")
+        elif event_list:
+            if reasons.get("_error", "").startswith("RuntimeError: API 키 없음"):
+                st.caption("LLM 연결이 없을 때는 키워드 규칙으로 자동 대체합니다 (목표 서비스는 기기 내 소형 모델).")
+            else:
+                st.info("AI 판단 연결이 잠시 원활하지 않아 키워드 규칙으로 판단했어요. 1분 뒤 자동으로 다시 시도합니다.")
         st.caption(f"단계 결정: {res['level']['reason']} · 절대 확률이 아닌 '같은 사람의 평소 대비' 값입니다.")
 
 with tab2:
@@ -338,3 +398,36 @@ with tab5:
     st.markdown(f"**맥락 일치 효과**: OR {S.CONTEXT_OR_LOW}~{S.CONTEXT_OR_HIGH} (설계 가정, 수치 근거는 확인한 범위에서 없음)")
     st.markdown(f"**고정층**: Spamley 공개 통계(N={P.SPAMLEY_N}, 평균 탐지율 {P.SPAMLEY_MEAN_RECALL}) 기반 합성 데이터로 학습 · "
                 "변수 12개의 탐지율 상관을 오차 0.01 이내로 재현")
+
+with tab6:
+    st.markdown("**AI 비서 연동 — 이미 아는 정보로 트윈을 자동으로 만듭니다**")
+    st.caption("개인 AI 비서가 기억하는 메모를 읽어 고정층 설문 초안과 요즘 일정을 채웁니다. "
+               "LLM은 초안만 만들고, 사용자가 확인·수정한 값으로 통계 모델이 취약도를 계산합니다.")
+    st.text_area("AI 비서 메모 (시연은 가상 인물)", key="memo", height=250)
+    b1, b2 = st.columns(2)
+    with b1:
+        st.button("트윈 자동 생성", on_click=apply_memo, type="primary", width="stretch")
+    with b2:
+        st.button("가상 사용자 기본값으로 되돌리기", on_click=reset_profile, width="stretch", key="reset2")
+
+    auto = st.session_state.get("auto_profile")
+    if auto and "error" in auto:
+        st.warning("AI 연결이 원활하지 않아 자동 생성을 하지 못했어요. 사이드바 설문으로 직접 입력할 수 있어요.")
+    elif auto:
+        st.success(f"설문 {len(auto['survey'])}/{len(SURVEY)}개 항목과 일정 {len(auto['events'])}개를 채웠어요. "
+                   "사이드바에서 확인·수정할 수 있고, 예보는 이미 새 트윈으로 다시 계산됐어요.")
+        cA, cB = st.columns([1.4, 1])
+        with cA:
+            st.markdown("**설문 초안**")
+            st.dataframe(pd.DataFrame([{
+                "항목": SURVEY[k][0], "추정값": str(auto["survey"].get(k, "—")),
+                "근거": auto["reasons"].get(k, "") if k in auto["survey"] else "메모에 근거 없음 → 기본값 유지"}
+                for k in SURVEY]), hide_index=True, width="stretch")
+        with cB:
+            st.markdown("**뽑아낸 요즘 일정**")
+            for e in auto["events"] or ["없음"]:
+                st.markdown(f"- {e}")
+            st.metric("기본 취약도(고정층)", f"{base_or:.2f}배", help="평균 사용자 대비 속을 오즈")
+            st.metric("오늘 취약도", f"{med:.2f}배 · {level}")
+    st.caption("※ 시연은 가상 인물 메모만 사용합니다. 목표 서비스에서는 사용자의 AI 비서가 기기 안에서 처리하고, "
+               "메모 원문이 아닌 설문 초안만 트윈에 넘깁니다. 메모로 추정한 값이 실제 설문과 얼마나 맞는지는 아직 검증 전입니다.")
